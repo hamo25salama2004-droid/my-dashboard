@@ -3,4 +3,4 @@ pandas
 numpy
 re
 BytesIO
-GoogleTranslator
+deep-translator

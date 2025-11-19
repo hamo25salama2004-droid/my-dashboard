@@ -1,16 +1,3 @@
-# ==========================================
-# 1. تثبيت المكتبات (Installation)
-# ==========================================
-import os
-print("جارٍ تثبيت المكتبات المطلوبة...")
-os.system("pip install -q streamlit pyngrok pandas openpyxl deep-translator")
-print("تم التثبيت بنجاح.")
-
-# ==========================================
-# 2. إنشاء ملف التطبيق (Create app.py)
-# ==========================================
-# نستخدم هنا الكتابة المباشرة للملف لتجنب مشكلة %%writefile
-app_code = r'''
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -18,7 +5,9 @@ import re
 from io import BytesIO
 from deep_translator import GoogleTranslator
 
+# ==========================================
 # إعداد الصفحة
+# ==========================================
 st.set_page_config(page_title="أداة تنظيف البيانات المتكاملة", layout="wide", page_icon="📊")
 
 # ------------------------------------------------------------------
@@ -343,33 +332,3 @@ if st.session_state.df is not None:
             st.download_button("تحميل Excel", convert_df(df, 'excel'), f"{fn}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     if choice != "تحميل البيانات": st.info("الرجاء تحميل ملف أولاً.")
-'''
-
-# كتابة الملف إلى القرص
-with open("app.py", "w", encoding='utf-8') as f:
-    f.write(app_code)
-
-print("تم إنشاء ملف app.py بنجاح.")
-
-# ==========================================
-# 3. تشغيل Ngrok و Streamlit
-# ==========================================
-from pyngrok import ngrok
-
-# إنهاء أي جلسات سابقة
-ngrok.kill()
-
-# (اختياري) ضع التوكن الخاص بك هنا إذا كان لديك واحد لزيادة الاستقرار
-# ngrok.set_auth_token("YOUR_AUTH_TOKEN")
-
-# تشغيل Streamlit في الخلفية
-print("جارٍ تشغيل التطبيق...")
-os.system("nohup streamlit run app.py --server.port 8501 &")
-
-# فتح النفق
-try:
-    public_url = ngrok.connect(8501).public_url
-    print(f"\n🚀 التطبيق يعمل الآن! اضغط على الرابط التالي:\n{public_url}")
-except Exception as e:
-    print(f"\nحدث خطأ في Ngrok: {e}")
-    print("ملاحظة: إذا فشل الاتصال، قد تحتاج إلى إنشاء حساب مجاني على ngrok.com والحصول على Authtoken.")

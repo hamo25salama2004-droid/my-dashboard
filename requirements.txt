@@ -3,4 +3,4 @@ pandas
 numpy
 deep-translator
 pyngrok
-openpyx1
+openpyxl

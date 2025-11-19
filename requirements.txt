@@ -1,6 +1,4 @@
 streamlit
 pandas
 numpy
-re
-BytesIO
-deep-translator
+GoogleTranslator

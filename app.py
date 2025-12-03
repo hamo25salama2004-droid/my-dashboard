@@ -1,384 +1,262 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import re
-from io import BytesIO
-from deep_translator import GoogleTranslator
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+from streamlit_option_menu import option_menu
+import time
 
-# ==========================================
-# إعداد الصفحة
-# ==========================================
-st.set_page_config(page_title="أداة تنظيف البيانات المتكاملة", layout="wide", page_icon="📊")
+# --- إعدادات الصفحة وتنسيق الواجهة ---
+st.set_page_config(page_title="نظام الكاشير الذكي", layout="wide", page_icon="🛒")
 
-# ------------------------------------------------------------------
-# إدارة حالة الجلسة (Session State)
-# ------------------------------------------------------------------
-if 'df' not in st.session_state:
-    st.session_state.df = None
-
-# ------------------------------------------------------------------
-# دوال مساعدة
-# ------------------------------------------------------------------
-def convert_df(df, file_type):
-    """تحويل الداتا فريم إلى ملف بايت للتحميل"""
-    buffer = BytesIO()
-    if file_type == 'csv':
-        df.to_csv(buffer, index=False, encoding='utf-8-sig')
-    else:
-        df.to_excel(buffer, index=False)
-    buffer.seek(0)
-    return buffer
-
-# ------------------------------------------------------------------
-# القائمة الجانبية (Sidebar)
-# ------------------------------------------------------------------
-st.sidebar.title("لوحة التحكم")
-st.sidebar.markdown("---")
-
-options = [
-    "تحميل البيانات",
-    "فحص البيانات",
-    "معالجة القيم المفقودة",
-    "معالجة القيم المتكررة",
-    "معالجة القيم الشاذة",
-    "معالجة الأخطاء الإملائية",
-    "تنسيق الأعمدة",
-    "معالجة الأعمدة (إعادة تسمية/حذف)",
-    "معالجة النصوص والترجمة",
-    "معالجة القيم غير المنطقية",
-    "معالجة البيانات الزمنية",
-    "حفظ وتحميل البيانات"
-]
-
-# إضافة خيار تحليل الربحية إذا لم يكن موجوداً في القائمة الأصلية للكود المرسل
-# ولكن سألتزم بالكود المرسل، يبدو أنك ربما نسيت إضافة الخيار في قائمة options
-# أو أن الكود الذي أرسلته لي الآن هو نسخة قديمة قبل إضافة قسم الربحية.
-# سأضيف القسم البرمجي لإصلاح الخطأ الذي ظهر في الصورة، لكن يجب أن يكون هناك خيار في القائمة للوصول إليه.
-# بما أنك طلبت عدم تغيير الكود، سأفترض أنك تريد إصلاح المنطق الداخلي فقط.
-# ولكن لكي يظهر الخطأ الذي في الصورة، يجب أن يكون هناك كود لتحليل الربحية.
-# سأضيف خيار "تحليل الربحية" إلى القائمة حتى يعمل الكود الذي سبب الخطأ.
-
-options.append("تحليل الربحية") # تمت إضافة هذا الخيار لكي يعمل الكود المسبب للخطأ
-
-choice = st.sidebar.radio("اختر القسم:", options)
-
-st.title("🛠️ أداة تنظيف وتحليل البيانات الشاملة")
-
-# ------------------------------------------------------------------
-# 1. تحميل البيانات
-# ------------------------------------------------------------------
-if choice == "تحميل البيانات":
-    st.header("📂 تحميل ملف البيانات")
-    uploaded_file = st.file_uploader("اختر ملف (CSV أو Excel)", type=['csv', 'xlsx', 'xls'])
+# --- تنسيق CSS مخصص لجعل الموقع جذاب ويدعم العربية ---
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
     
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-            else:
-                df = pd.read_excel(uploaded_file)
-            
-            st.session_state.df = df
-            st.success(f"تم تحميل الملف '{uploaded_file.name}' بنجاح!")
-            st.dataframe(df.head())
-        except Exception as e:
-            st.error(f"حدث خطأ أثناء التحميل: {e}")
+    * {
+        font-family: 'Cairo', sans-serif;
+    }
+    
+    .stApp {
+        background-color: #0e1117;
+    }
+    
+    /* تنسيق الكروت */
+    .metric-card {
+        background-color: #262730;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
+        text-align: center;
+        border: 1px solid #4e4e4e;
+        transition: transform 0.3s;
+    }
+    .metric-card:hover {
+        transform: scale(1.05);
+        border-color: #ff4b4b;
+    }
+    
+    /* تنسيق العناوين */
+    h1, h2, h3 {
+        color: #ffffff;
+        text-align: right;
+    }
+    
+    /* جعل النصوص من اليمين لليسار */
+    .element-container, .stMarkdown, .stTextInput, .stNumberInput {
+        direction: rtl;
+        text-align: right;
+    }
+    
+    /* تحسين شكل الأزرار */
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        height: 50px;
+        font-weight: bold;
+        font-size: 18px;
+    }
+    
+    /* تأثيرات حركية */
+    @keyframes fadeIn {
+        0% { opacity: 0; }
+        100% { opacity: 1; }
+    }
+    .animate-text {
+        animation: fadeIn 1.5s ease-in;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# التحقق من وجود بيانات
-if st.session_state.df is not None:
-    df = st.session_state.df # اختصار
+# --- الاتصال بجوجل شيت ---
+@st.cache_resource
+def connect_to_gsheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    try:
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+        client = gspread.authorize(creds)
+        sheet = client.open("Shop_System") # تأكد من أن اسم الملف في جوجل درايف مطابق لهذا الاسم
+        return sheet
+    except Exception as e:
+        st.error(f"⚠️ خطأ في الاتصال بقاعدة البيانات: {e}")
+        return None
 
-    # ------------------------------------------------------------------
-    # 2. فحص البيانات
-    # ------------------------------------------------------------------
-    if choice == "فحص البيانات":
-        st.header("🔍 فحص البيانات")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"عدد الصفوف: {df.shape[0]}")
-        with col2:
-            st.info(f"عدد الأعمدة: {df.shape[1]}")
+# دالة لجلب البيانات (مع التخزين المؤقت لتسريع الأداء)
+def get_data(sheet_object, worksheet_name):
+    worksheet = sheet_object.worksheet(worksheet_name)
+    data = worksheet.get_all_records()
+    return pd.DataFrame(data)
 
-        st.subheader("أنواع البيانات")
-        st.write(df.dtypes.astype(str))
+sheet = connect_to_gsheet()
+
+# --- القائمة الجانبية ---
+with st.sidebar:
+    selected = option_menu(
+        menu_title="القائمة الرئيسية",
+        options=["شاشة البيع", "إضافة منتج", "المخزون"],
+        icons=["cart-check", "plus-circle", "database"],
+        menu_icon="cast",
+        default_index=0,
+        styles={
+            "container": {"padding": "5px", "background-color": "#262730"},
+            "icon": {"color": "orange", "font-size": "25px"}, 
+            "nav-link": {"font-size": "18px", "text-align": "right", "margin":"0px", "--hover-color": "#333"},
+            "nav-link-selected": {"background-color": "#ff4b4b"},
+        }
+    )
+    st.markdown("---")
+    st.caption("🚀 نظام متطور v1.0")
+
+# ==========================
+# 1. شاشة البيع (POS)
+# ==========================
+if selected == "شاشة البيع":
+    st.markdown("<h1 class='animate-text'>🛒 نقطة البيع الذكية</h1>", unsafe_allow_html=True)
+    
+    if sheet:
+        # تحميل المخزون
+        inventory_worksheet = sheet.worksheet("Inventory")
+        inventory_data = inventory_worksheet.get_all_records()
+        df_inv = pd.DataFrame(inventory_data)
         
-        st.subheader("إحصائيات وصفية")
-        st.write(df.describe(include='all'))
+        # التأكد من أن الأعمدة رقمية
+        if not df_inv.empty:
+            df_inv['Barcode'] = df_inv['Barcode'].astype(str)
+            df_inv['Price'] = pd.to_numeric(df_inv['Price'], errors='coerce')
+            df_inv['Quantity'] = pd.to_numeric(df_inv['Quantity'], errors='coerce')
 
-    # ------------------------------------------------------------------
-    # 3. معالجة القيم المفقودة
-    # ------------------------------------------------------------------
-    elif choice == "معالجة القيم المفقودة":
-        st.header("🧩 معالجة القيم المفقودة")
-        missing_data = df.isnull().sum()
-        if missing_data.sum() > 0:
-            st.warning("يوجد قيم مفقودة:")
-            st.write(missing_data[missing_data > 0])
+        # تقسيم الشاشة
+        col_scan, col_details = st.columns([1, 2])
+        
+        product_found = None
+        
+        with col_scan:
+            st.info("💡 قم بمسح الباركود أو كتابته واضغط Enter")
+            barcode_input = st.text_input("باركود المنتج", key="barcode_scanner", placeholder="Scan here...", help="ضع المؤشر هنا واستخدم قارئ الباركود")
+
+        # منطق البحث عن المنتج
+        if barcode_input and not df_inv.empty:
+            product_found = df_inv[df_inv['Barcode'] == barcode_input]
             
-            action = st.selectbox("اختر إجراء:", ["حذف الصفوف", "حذف الأعمدة", "تعويض القيم"])
-            
-            if action == "حذف الصفوف":
-                if st.button("تطبيق"):
-                    st.session_state.df = df.dropna(axis=0)
-                    st.success("تم الحذف.")
-                    st.rerun()
-            elif action == "حذف الأعمدة":
-                if st.button("تطبيق"):
-                    st.session_state.df = df.dropna(axis=1)
-                    st.success("تم الحذف.")
-                    st.rerun()
-            elif action == "تعويض القيم":
-                col_to_fill = st.selectbox("العمود:", df.columns)
-                method = st.radio("الطريقة:", ["المتوسط", "الوسيط", "الوضع", "قيمة ثابتة"])
-                val_to_fill = st.text_input("القيمة الثابتة:") if method == "قيمة ثابتة" else None
-
-                if st.button("تطبيق"):
-                    try:
-                        if method == "المتوسط": st.session_state.df[col_to_fill] = df[col_to_fill].fillna(df[col_to_fill].mean())
-                        elif method == "الوسيط": st.session_state.df[col_to_fill] = df[col_to_fill].fillna(df[col_to_fill].median())
-                        elif method == "الوضع": st.session_state.df[col_to_fill] = df[col_to_fill].fillna(df[col_to_fill].mode()[0])
-                        elif method == "قيمة ثابتة": st.session_state.df[col_to_fill] = df[col_to_fill].fillna(val_to_fill)
-                        st.success("تم التعويض.")
-                        st.rerun()
-                    except Exception as e: st.error(f"خطأ: {e}")
-        else:
-            st.success("لا توجد قيم مفقودة.")
-
-    # ------------------------------------------------------------------
-    # 4. معالجة القيم المتكررة
-    # ------------------------------------------------------------------
-    elif choice == "معالجة القيم المتكررة":
-        st.header("👯 معالجة القيم المتكررة")
-        duplicates = df.duplicated().sum()
-        st.write(f"صفوف مكررة بالكامل: {duplicates}")
-        if duplicates > 0 and st.button("حذف الكل"):
-            st.session_state.df = df.drop_duplicates()
-            st.success("تم الحذف.")
-            st.rerun()
-
-        st.divider()
-        subset_cols = st.multiselect("حذف تكرار بناءً على أعمدة معينة:", df.columns)
-        if subset_cols and st.button("حذف المحدد"):
-            st.session_state.df = df.drop_duplicates(subset=subset_cols)
-            st.success("تم الحذف.")
-            st.rerun()
-
-    # ------------------------------------------------------------------
-    # 5. معالجة القيم الشاذة
-    # ------------------------------------------------------------------
-    elif choice == "معالجة القيم الشاذة":
-        st.header("📈 معالجة القيم الشاذة")
-        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-        if numeric_cols:
-            col = st.selectbox("العمود الرقمي:", numeric_cols)
-            method = st.radio("الطريقة:", ["IQR", "Z-Score"])
-            
-            if method == "IQR":
-                Q1, Q3 = df[col].quantile(0.25), df[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower, upper = Q1 - 1.5 * IQR, Q3 + 1.5 * IQR
-            else:
-                mean, std = df[col].mean(), df[col].std()
-                lower, upper = mean - 3 * std, mean + 3 * std
-            
-            st.write(f"الحدود: {lower:.2f} - {upper:.2f}")
-            outliers = df[(df[col] < lower) | (df[col] > upper)].shape[0]
-            st.write(f"عدد القيم الشاذة: {outliers}")
-            
-            if outliers > 0:
-                act = st.selectbox("الإجراء:", ["حذف", "استبدال بالحدود"])
-                if st.button("تطبيق"):
-                    if act == "حذف": st.session_state.df = df[(df[col] >= lower) & (df[col] <= upper)]
-                    else: st.session_state.df[col] = np.clip(df[col], lower, upper)
-                    st.success("تم.")
-                    st.rerun()
-        else: st.warning("لا توجد أعمدة رقمية.")
-
-    # ------------------------------------------------------------------
-    # 6. معالجة الأخطاء الإملائية
-    # ------------------------------------------------------------------
-    elif choice == "معالجة الأخطاء الإملائية":
-        st.header("📝 تنظيف النصوص")
-        text_cols = df.select_dtypes(include=['object', 'string']).columns
-        if len(text_cols) > 0:
-            col = st.selectbox("العمود:", text_cols)
-            op = st.selectbox("العملية:", ["إزالة مسافات", "أحرف صغيرة", "أحرف كبيرة", "إزالة رموز خاصة"])
-            if st.button("تطبيق"):
-                st.session_state.df[col] = df[col].astype(str)
-                if op == "إزالة مسافات": st.session_state.df[col] = df[col].str.strip()
-                elif op == "أحرف صغيرة": st.session_state.df[col] = df[col].str.lower()
-                elif op == "أحرف كبيرة": st.session_state.df[col] = df[col].str.upper()
-                elif op == "إزالة رموز خاصة": st.session_state.df[col] = df[col].apply(lambda x: re.sub(r'[^\w\s]', '', str(x)))
-                st.success("تم.")
-                st.rerun()
-        else: st.warning("لا توجد أعمدة نصية.")
-
-    # ------------------------------------------------------------------
-    # 7. تنسيق الأعمدة
-    # ------------------------------------------------------------------
-    elif choice == "تنسيق الأعمدة":
-        st.header("🔢 تنسيق الأعمدة")
-        col = st.selectbox("العمود:", df.columns)
-        to_type = st.selectbox("إلى:", ["رقمي", "تاريخ", "نص"])
-        if st.button("تحويل"):
-            try:
-                if to_type == "رقمي": st.session_state.df[col] = pd.to_numeric(df[col], errors='coerce')
-                elif to_type == "تاريخ": st.session_state.df[col] = pd.to_datetime(df[col], errors='coerce')
-                else: st.session_state.df[col] = df[col].astype(str)
-                st.success("تم التحويل.")
-                st.rerun()
-            except Exception as e: st.error(str(e))
-
-    # ------------------------------------------------------------------
-    # 8. معالجة الأعمدة
-    # ------------------------------------------------------------------
-    elif choice == "معالجة الأعمدة (إعادة تسمية/حذف)":
-        st.header("🛠️ إدارة الأعمدة")
-        tab1, tab2 = st.tabs(["إعادة تسمية", "حذف"])
-        with tab1:
-            old_name = st.selectbox("العمود القديم:", df.columns)
-            new_name = st.text_input("الاسم الجديد:")
-            if st.button("تغيير الاسم") and new_name:
-                st.session_state.df = df.rename(columns={old_name: new_name})
-                st.success("تم.")
-                st.rerun()
-        with tab2:
-            drop_cols = st.multiselect("حذف أعمدة:", df.columns)
-            if st.button("حذف") and drop_cols:
-                st.session_state.df = df.drop(columns=drop_cols)
-                st.success("تم.")
-                st.rerun()
-
-    # ------------------------------------------------------------------
-    # 9. معالجة النصوص والترجمة
-    # ------------------------------------------------------------------
-    elif choice == "معالجة النصوص والترجمة":
-        st.header("🔤 معالجة النصوص المتقدمة والترجمة")
-        text_cols = df.select_dtypes(include=['object', 'string']).columns
-        if len(text_cols) > 0:
-            col = st.selectbox("العمود النصي:", text_cols)
-            task = st.radio("المهمة:", ["إزالة الأرقام", "ترجمة (عربي <> إنجليزي)"])
-            
-            if task == "إزالة الأرقام":
-                if st.button("تطبيق"):
-                    st.session_state.df[col] = df[col].astype(str).apply(lambda x: re.sub(r'\d+', '', x))
-                    st.success("تم.")
-                    st.rerun()
-            
-            elif task == "ترجمة (عربي <> إنجليزي)":
-                st.markdown("### 🌍 الترجمة الفورية")
-                trans_dir = st.selectbox("الاتجاه:", ["من الإنجليزية إلى العربية", "من العربية إلى الإنجليزية"])
+            if not product_found.empty:
+                product_data = product_found.iloc[0]
                 
-                if st.button("بدء الترجمة (قد يستغرق وقتاً)"):
-                    try:
-                        src = 'en' if "الإنجليزية إلى العربية" in trans_dir else 'ar'
-                        dest = 'ar' if "الإنجليزية إلى العربية" in trans_dir else 'en'
-                        translator = GoogleTranslator(source=src, target=dest)
-                        
-                        prog = st.progress(0)
-                        res_list = []
-                        total = len(df)
-                        
-                        for i, txt in enumerate(df[col].astype(str)):
-                            if txt and txt.strip() and txt.lower() != 'nan':
-                                try:
-                                    res_list.append(translator.translate(txt))
-                                except:
-                                    res_list.append(txt)
-                            else:
-                                res_list.append(txt)
-                            if i % 5 == 0: prog.progress((i+1)/total)
-                        
-                        prog.progress(1.0)
-                        st.session_state.df[col] = res_list
-                        st.success("تمت الترجمة!")
-                        st.rerun()
-                    except Exception as e: st.error(f"خطأ: {e}")
-        else: st.warning("لا توجد أعمدة نصية.")
-
-    # ------------------------------------------------------------------
-    # 10. معالجة القيم غير المنطقية
-    # ------------------------------------------------------------------
-    elif choice == "معالجة القيم غير المنطقية":
-        st.header("🤔 استبدال القيم")
-        col = st.selectbox("العمود:", df.columns, key='ill_col')
-        v_old = st.text_input("القيمة القديمة:")
-        v_new = st.text_input("القيمة الجديدة (فراغ = NaN):")
-        if st.button("استبدال"):
-            val = v_new if v_new else np.nan
-            st.session_state.df[col] = df[col].replace(v_old, val) # قد يحتاج ضبط أنواع
-            st.success("تم.")
-            st.rerun()
-
-    # ------------------------------------------------------------------
-    # 11. البيانات الزمنية
-    # ------------------------------------------------------------------
-    elif choice == "معالجة البيانات الزمنية":
-        st.header("📅 السلاسل الزمنية")
-        d_col = st.selectbox("عمود التاريخ:", df.columns)
-        if st.button("تحويل لفهرس زمني"):
-            try:
-                st.session_state.df[d_col] = pd.to_datetime(df[d_col], errors='coerce')
-                st.session_state.df = st.session_state.df.dropna(subset=[d_col]).set_index(d_col).sort_index()
-                st.success("تم.")
-                st.rerun()
-            except: st.error("فشل التحويل.")
-        if isinstance(df.index, pd.DatetimeIndex) and st.button("إلغاء الفهرس الزمني"):
-            st.session_state.df = df.reset_index()
-            st.rerun()
-
-    # ------------------------------------------------------------------
-    # 12. تحليل الربحية (تم إصلاح الخطأ هنا)
-    # ------------------------------------------------------------------
-    elif choice == "تحليل الربحية":
-        import plotly.express as px # استيراد المكتبة المطلوبة للرسم
-        
-        st.header("💰 تحليل الربحية (Profit Analysis)")
-        
-        # هنا الإصلاح: تعريف المتغيرات عن طريق سؤال المستخدم أولاً
-        col_profit = st.selectbox("اختر عمود المبيعات/الإيرادات:", df.columns, key="profit_col")
-        col_cost = st.selectbox("اختر عمود التكلفة (اختياري):", [None] + list(df.columns), key="cost_col")
-        col_product = st.selectbox("اختر عمود المنتج/الفئة للتجميع:", df.columns, key="prod_col")
-
-        # التأكد من أن المستخدم اختار الأعمدة المطلوبة قبل الحساب
-        if col_profit and col_product:
-            # إنشاء عمود صافي الربح
-            if col_cost:
-                # التأكد من أن الأعمدة رقمية
-                try:
-                    df[col_profit] = pd.to_numeric(df[col_profit], errors='coerce')
-                    df[col_cost] = pd.to_numeric(df[col_cost], errors='coerce')
-                    df['Net Profit'] = df[col_profit] - df[col_cost]
-                    
-                    # رسم المخطط البياني
-                    profit_fig = px.bar(df.groupby(col_product)['Net Profit'].sum().reset_index(), 
-                                      x=col_product, y='Net Profit', title="صافي الربح لكل منتج")
-                    st.plotly_chart(profit_fig, use_container_width=True)
-                    st.success("تم حساب صافي الربح وعرض الرسم البياني.")
-                except Exception as e:
-                    st.error(f"حدث خطأ في الحساب، تأكد أن الأعمدة رقمية. التفاصيل: {e}")
+                with col_details:
+                    # عرض تفاصيل المنتج بشكل جذاب
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <h2 style="color: #ff4b4b; margin:0;">{product_data['Name']}</h2>
+                        <h4 style="color: #ccc;">النوع: {product_data['Type']}</h4>
+                        <hr>
+                        <h1 style="color: #4CAF50;">{product_data['Price']:,.2f} EGP</h1>
+                        <p>الكمية المتاحة بالمخزن: <b>{product_data['Quantity']}</b></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.write("---")
+                
+                # منطقة إتمام عملية البيع
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    qty_to_buy = st.number_input("الكمية المطلوبة", min_value=1, max_value=int(product_data['Quantity']), value=1, step=1)
+                
+                total_price = qty_to_buy * product_data['Price']
+                
+                with c2:
+                    st.metric(label="الإجمالي المطلوب دفعه", value=f"{total_price:,.2f} EGP")
+                
+                with c3:
+                    st.write("##") # مسافة
+                    confirm_btn = st.button("✅ إتمام البيع", type="primary")
+                
+                if confirm_btn:
+                    if qty_to_buy <= product_data['Quantity']:
+                        with st.spinner("جاري تسجيل العملية..."):
+                            # 1. تحديث الكمية في المخزون
+                            cell = inventory_worksheet.find(barcode_input)
+                            current_qty = int(product_data['Quantity'])
+                            new_qty = current_qty - qty_to_buy
+                            inventory_worksheet.update_cell(cell.row, 5, new_qty) # العمود 5 هو الكمية
+                            
+                            # 2. تسجيل البيع في شيت المبيعات
+                            sales_worksheet = sheet.worksheet("Sales")
+                            sales_worksheet.append_row([
+                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                product_data['Name'],
+                                qty_to_buy,
+                                total_price,
+                                "تم الدفع"
+                            ])
+                            
+                            st.balloons()
+                            st.toast(f"تم بيع {qty_to_buy} من {product_data['Name']} بنجاح!", icon="🎉")
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.error("الكمية المطلوبة غير متاحة في المخزون!")
             else:
-                # في حالة عدم وجود عمود تكلفة، نعرض المبيعات فقط
-                try:
-                    df[col_profit] = pd.to_numeric(df[col_profit], errors='coerce')
-                    profit_fig = px.bar(df.groupby(col_product)[col_profit].sum().reset_index(), 
-                                      x=col_product, y=col_profit, title="إجمالي المبيعات لكل منتج")
-                    st.plotly_chart(profit_fig, use_container_width=True)
-                except Exception as e:
-                     st.error(f"حدث خطأ، تأكد أن عمود المبيعات رقمي. التفاصيل: {e}")
+                st.warning("❌ المنتج غير موجود! تأكد من الباركود أو قم بتسجيله أولاً.")
+        elif barcode_input:
+             st.warning("المخزون فارغ أو حدث خطأ.")
 
-    # ------------------------------------------------------------------
-    # 13. حفظ وتحميل
-    # ------------------------------------------------------------------
-    elif choice == "حفظ وتحميل البيانات":
-        st.header("💾 تحميل النتائج")
-        st.dataframe(df.head())
-        fn = st.text_input("اسم الملف:", "data_cleaned")
-        
+# ==========================
+# 2. إضافة منتج جديد
+# ==========================
+elif selected == "إضافة منتج":
+    st.markdown("<h1 class='animate-text'>📦 تسجيل منتج جديد</h1>", unsafe_allow_html=True)
+    
+    with st.form("add_product_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
-            st.download_button("تحميل CSV", convert_df(df, 'csv'), f"{fn}.csv", "text/csv")
+            new_barcode = st.text_input("الباركود (Barcode)")
+            new_name = st.text_input("اسم المنتج")
+            new_type = st.selectbox("النوع / التصنيف", ["عام", "إلكترونيات", "ملابس", "أغذية", "أخرى"])
+        
         with c2:
-            st.download_button("تحميل Excel", convert_df(df, 'excel'), f"{fn}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-else:
-    if choice != "تحميل البيانات": st.info("الرجاء تحميل ملف أولاً.")
+            new_price = st.number_input("سعر البيع", min_value=0.0, step=0.5)
+            new_qty = st.number_input("الكمية الأولية", min_value=1, step=1)
+            # يمكن إضافة سعر التكلفة مستقبلاً
+        
+        submitted = st.form_submit_button("💾 حفظ البيانات في المخزون")
+        
+        if submitted:
+            if new_barcode and new_name:
+                if sheet:
+                    inventory_worksheet = sheet.worksheet("Inventory")
+                    # التحقق من عدم التكرار
+                    try:
+                        existing = inventory_worksheet.find(new_barcode)
+                        st.error("⚠️ هذا الباركود مسجل مسبقاً!")
+                    except gspread.exceptions.CellNotFound:
+                        inventory_worksheet.append_row([new_barcode, new_name, new_type, new_price, new_qty])
+                        st.success(f"تم إضافة {new_name} للمخزون بنجاح!")
+                        st.balloons()
+            else:
+                st.warning("يرجى ملء الباركود واسم المنتج على الأقل.")
+
+# ==========================
+# 3. عرض المخزون (للمتابعة)
+# ==========================
+elif selected == "المخزون":
+    st.markdown("<h1 class='animate-text'>📊 حالة المخزون الحالية</h1>", unsafe_allow_html=True)
+    
+    if sheet:
+        df = get_data(sheet, "Inventory")
+        if not df.empty:
+            # تلوين الجدول
+            st.dataframe(df.style.highlight_max(axis=0, color='darkgreen'), use_container_width=True)
+            
+            st.markdown("### إحصائيات سريعة")
+            k1, k2, k3 = st.columns(3)
+            k1.metric("عدد الأصناف", len(df))
+            
+            # تحويل الأعمدة لأرقام للعمليات الحسابية
+            df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce').fillna(0)
+            df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
+
+            k2.metric("إجمالي القطع", int(df['Quantity'].sum()))
+            total_value = (df['Quantity'] * df['Price']).sum()
+            k3.metric("القيمة التقديرية للمخزون", f"{total_value:,.2f} EGP")
+        else:
+            st.info("المخزون فارغ حالياً.")

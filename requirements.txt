@@ -1,6 +1,6 @@
 streamlit
 pandas
-numpy
-deep-translator
-pyngrok
-openpyxl
+gspread
+oauth2client
+streamlit-option-menu
+streamlit-aggrid
